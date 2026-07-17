@@ -1,0 +1,13 @@
+# The upstream Nicotine+ clone is reference only, not part of this repo
+nicotine-plus/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Local tooling
+.claude/

@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+Version = "1.0.0"
+Authors = ["NicoSeeker contributors"]
+Name = "NicoSeeker - Spotify Playlist Import"
+Description = "Import a public Spotify playlist or song (no API keys) and queue the best-matching, quality-ranked copies for download. Use /spotify <url>."
