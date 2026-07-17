@@ -28,8 +28,16 @@ maintain.
 
 1. Install Nicotine+ from [nicotine-plus.org](https://nicotine-plus.org/) (or
    your package manager) and sign in to Soulseek.
-2. Copy the **`nicoseeker`** folder from this repo into your Nicotine+ user
-   plugins folder:
+2. Download **`nicoseeker.zip`** from the
+   [latest release](../../releases/latest) and unzip it into your Nicotine+
+   user plugins folder. The zip contains a single `nicoseeker/` folder, so it
+   drops straight in.
+
+   > Don't use GitHub's green "Code → Download ZIP" / the auto-generated
+   > source archives: those unpack as `nicoseeker-<version>/` with the plugin
+   > nested inside, which Nicotine+ won't detect as a plugin.
+
+   Plugins folder:
 
    | OS | Plugins folder |
    |----|----------------|
