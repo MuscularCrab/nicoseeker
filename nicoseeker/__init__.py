@@ -23,6 +23,22 @@ except ImportError:  # pragma: no cover - package-style import
     from .ns_matching import Result, build_query, rank
     from .ns_spotify import SpotifyError, fetch_playlist, import_csv
 
+# Nicotine+ 3.3.x delivers a search result's file attributes as a dict keyed
+# by these numbers (FileAttribute.BITRATE / DURATION); newer dev builds use an
+# object with .bitrate / .length. Support both so the plugin works on either.
+_ATTR_BITRATE = 0
+_ATTR_DURATION = 1
+
+
+def _attr(attrs, dict_key, obj_name):
+    """Read a file attribute from either a dict or an attributes object."""
+    try:
+        if isinstance(attrs, dict):
+            return int(attrs.get(dict_key) or 0)
+        return int(getattr(attrs, obj_name, 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
 
 class Plugin(BasePlugin):
 
@@ -65,7 +81,13 @@ class Plugin(BasePlugin):
                 "description": "How many copies to grab per track:",
                 "type": "int", "minimum": 1, "maximum": 3
             },
+            "close_search_tabs": {
+                "description": ("Close each track's search tab once its "
+                                "results have been processed"),
+                "type": "bool"
+            },
         }
+        self.settings["close_search_tabs"] = True
 
         self.commands = {
             "spotify": {
@@ -86,22 +108,29 @@ class Plugin(BasePlugin):
         self._queue = []          # remaining Tracks to search
         self._running = False
         self._playlist_name = ""
+        # Set to the Track while we call do_search, so the "add-search"
+        # event can tell our searches apart from the user's own
+        self._expecting = None
 
     # -------------------------------------------------------- lifecycle
 
     def loaded_notification(self):
         events.connect("file-search-response", self._on_search_response)
+        events.connect("add-search", self._on_add_search)
         self.log("NicoSeeker ready. Use /spotify <playlist or song URL> to "
                  "import a Spotify playlist.")
 
     def disable(self):
-        try:
-            events.disconnect("file-search-response", self._on_search_response)
-        except Exception:
-            pass
+        for name, cb in (("file-search-response", self._on_search_response),
+                         ("add-search", self._on_add_search)):
+            try:
+                events.disconnect(name, cb)
+            except Exception:
+                pass
         self._running = False
         self._queue = []
         self._pending = {}
+        self._expecting = None
 
     # --------------------------------------------------------- commands
 
@@ -174,20 +203,30 @@ class Plugin(BasePlugin):
             self._schedule_next()
             return
 
+        # The token is captured in _on_add_search, which fires synchronously
+        # from do_search. Reading a private attribute (e.g. search._token)
+        # breaks across Nicotine+ versions, so we use the public event.
+        self._expecting = track
         try:
             self.core.search.do_search(query, "global", switch_page=False)
-            token = self.core.search._token  # noqa: SLF001
         except Exception as exc:  # noqa: BLE001
             self.log(f"Search failed for '{track}': {exc}")
             self._schedule_next()
             return
+        finally:
+            self._expecting = None
 
-        self._pending[token] = {"track": track, "results": []}
         self.log(f"Searching: {track}")
+        self._schedule_next()
+
+    def _on_add_search(self, token, search, *_args):
+        """Fires for every new search. Only claim the one we just started."""
+        if self._expecting is None:
+            return
+        self._pending[token] = {"track": self._expecting, "results": []}
         wait = int(self.settings["results_wait_seconds"])
         events.schedule(delay=wait, callback=self._collect,
                         callback_args=(token,))
-        self._schedule_next()
 
     def _schedule_next(self):
         gap = int(self.settings["seconds_between_searches"])
@@ -210,8 +249,8 @@ class Plugin(BasePlugin):
                 continue
             bucket["results"].append(Result(
                 username=username, path=name, size=int(size or 0),
-                bitrate=int(getattr(attrs, "bitrate", 0) or 0),
-                length=int(getattr(attrs, "length", 0) or 0),
+                bitrate=_attr(attrs, _ATTR_BITRATE, "bitrate"),
+                length=_attr(attrs, _ATTR_DURATION, "length"),
                 free_slots=free, queue=queue, speed=speed))
 
     def _collect(self, token):
@@ -241,6 +280,13 @@ class Plugin(BasePlugin):
                              f"from {r.username}")
                 except Exception as exc:  # noqa: BLE001
                     self.log(f"Could not queue {track}: {exc}")
+
+        # Tidy up the per-track search tab we created
+        if self.settings.get("close_search_tabs", True):
+            try:
+                self.core.search.remove_search(token)
+            except Exception:  # noqa: BLE001
+                pass
 
         if self._running and not self._queue and not self._pending:
             self._running = False
